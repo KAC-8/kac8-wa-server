@@ -1,6 +1,9 @@
+// ==========================================
+// KAC8 WhatsApp Notification Engine (Anti-Ban Edition)
+// ==========================================
+
 const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcodeTerminal = require('qrcode-terminal');
 const qrcodeImage = require('qrcode');
 require('dotenv').config();
 
@@ -16,36 +19,30 @@ let latestQR = "";
 const authenticate = (req, res, next) => {
     const token = req.headers['authorization'];
     if (token === `Bearer ${API_KEY}`) {
-        next();
+        next(); 
     } else {
         console.warn('⚠️ محاولة وصول غير مصرح بها!');
         res.status(401).json({ error: 'Unauthorized: خييير وش تبي؟' });
     }
 };
 
-// 🟢 إعداد عميل الواتساب (نسخة التخسيس القصوى للرام - 512MB Limit Bypass)
+// 🟢 إعداد عميل الواتساب (مضاف إليه كاسر حظر الإصدارات)
 const client = new Client({
     authStrategy: new LocalAuth(), 
+    // 🔥 هذا السطر السحري يجبر المكتبة تستخدم نسخة حديثة لتجاوز خطأ "يتعذر ربط أجهزة جديدة"
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+    },
     puppeteer: {
-        headless: true,
+        headless: true, 
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage', // يمنع كراش الرام الأساسي
+            '--disable-dev-shm-usage', 
             '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
             '--disable-gpu',
-            // 🛑 ترسانة التخسيس الإضافية لمنع استهلاك الرام:
-            '--disable-extensions',
-            '--disable-background-networking',
-            '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding',
-            '--disable-software-rasterizer',
-            '--mute-audio',
-            '--hide-scrollbars',
-            '--js-flags="--max-old-space-size=256"' // يجبر المتصفح ينظف الذاكرة بقوة
+            '--js-flags="--max-old-space-size=1024"' 
         ] 
     }
 });
@@ -55,7 +52,7 @@ client.on('qr', (qr) => {
     latestQR = qr;
     console.log('\n=========================================');
     console.log('📱 تم توليد باركود جديد! افتح الرابط التالي لمسحه كصورة:');
-    console.log(`🌐 ${process.env.RENDER_EXTERNAL_URL || ('http://localhost:' + PORT)}/qr`);
+    console.log(`🌐 https://wa.kac8.codes/qr`);
     console.log('=========================================\n');
 });
 
@@ -65,6 +62,7 @@ client.on('ready', () => {
     console.log('🟢 المدفعية جاهزة! الواتساب متصل بنجاح.');
 });
 
+// تشغيل المتصفح وبدء الجلسة
 client.initialize();
 
 // 🖼️ مسار عرض الباركود كصورة (بثيم KAC8)
@@ -82,7 +80,7 @@ app.get('/qr', async (req, res) => {
             <div style="display:flex; justify-content:center; align-items:center; height:100vh; flex-direction:column; background-color:#080808; color:#2e6417; font-family:sans-serif;">
                 <h1>📱 امسح الباركود لربط متجر KAC8</h1>
                 <img src="${qrImageUrl}" alt="QR Code" style="border: 15px solid white; border-radius: 10px; width: 300px; height: 300px;" />
-                <p style="margin-top: 20px;">قم بتحديث الصفحة إذا تأخرت في مسحه (يتغير كل دقيقة).</p>
+                <p style="margin-top: 20px; font-weight: bold;">تنبيه: الباركود يتغير كل 20 ثانية. حدث الصفحة وامسح فوراً!</p>
             </div>
         `);
     } catch (err) {
@@ -90,7 +88,7 @@ app.get('/qr', async (req, res) => {
     }
 });
 
-// 🚀 مسار إرسال الرسائل (الدولي الخفيف)
+// 🚀 مسار إرسال الرسائل
 app.post('/send', authenticate, async (req, res) => {
     const { phone, message } = req.body;
     
@@ -99,25 +97,18 @@ app.post('/send', authenticate, async (req, res) => {
     }
 
     try {
-        // 1. تنظيف الرقم من أي رموز أو مسافات
         let formattedPhone = phone.replace(/[^0-9]/g, '');
         
-        // 2. معالجة الأرقام بذكاء دولي
         if (formattedPhone.startsWith('00')) {
-            // تحويل 00966 إلى 966
-            formattedPhone = formattedPhone.substring(2);
+            formattedPhone = formattedPhone.substring(2); 
         } else if (formattedPhone.startsWith('05') && formattedPhone.length === 10) {
-            // رقم سعودي محلي (05XXXXXXXX)
-            formattedPhone = '966' + formattedPhone.substring(1);
+            formattedPhone = '966' + formattedPhone.substring(1); 
         } else if (formattedPhone.startsWith('5') && formattedPhone.length === 9) {
-            // رقم سعودي محلي (5XXXXXXXX)
-            formattedPhone = '966' + formattedPhone;
+            formattedPhone = '966' + formattedPhone; 
         }
-        // الأرقام الأخرى (الدولية) ستبقى كما هي بافتراض أنها صحيحة!
 
-        const chatId = `${formattedPhone}@c.us`;
+        const chatId = `${formattedPhone}@c.us`; 
 
-        // إرسال مباشر (بدون فحص isRegisteredUser لتجنب كراش الرام)
         await client.sendMessage(chatId, message);
         console.log(`📩 تم إرسال رسالة إلى: ${formattedPhone}`);
         res.status(200).json({ success: true, msg: 'Message sent successfully!' });
@@ -127,26 +118,6 @@ app.post('/send', authenticate, async (req, res) => {
         res.status(500).json({ error: 'Failed to send message', details: error.message });
     }
 });
-
-// مسار النبض
-app.get('/ping', (req, res) => {
-    res.status(200).send('I am awake, Emperor!');
-});
-
-// سكريبت الهاكرز للبقاء مستيقظاً
-const keepAwake = () => {
-    const min = 5 * 60 * 1000;
-    const max = 14 * 60 * 1000;
-    const randomTime = Math.floor(Math.random() * (max - min + 1)) + min;
-    setTimeout(() => {
-        const url = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-        fetch(`${url}/ping`)
-            .then(() => console.log(`[Keep-Alive ⚔️] النبض شغال! الضربة القادمة بعد ${Math.round(randomTime/60000)} دقايق.`))
-            .catch(err => console.error('[Keep-Alive ❌] فشل النبض:', err.message));
-        keepAwake();
-    }, randomTime);
-};
-keepAwake();
 
 app.listen(PORT, () => {
     console.log(`🚀 سيرفر الإشعارات شغال وينتظر الأوامر على البورت ${PORT}`);
