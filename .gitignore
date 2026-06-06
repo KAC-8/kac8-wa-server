@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+
+# WhatsApp Web JS Auth & Cache files
+.wwebjs_auth/
+.wwebjs_cache/
+
+# OS generated files
+.DS_Store
+Thumbs.db
