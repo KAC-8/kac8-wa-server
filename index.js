@@ -10,7 +10,7 @@ require('dotenv').config();
 const app = express();
 app.use(express.json());
 
-const API_KEY = process.env.API_KEY || 'kac8_super_secret_key_2026';
+const API_KEY = process.env.API_KEY || 'kac8_super_secret_key_0530959369';
 const PORT = process.env.PORT || 3001;
 
 let latestQR = ""; 
