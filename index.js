@@ -1,7 +1,7 @@
 const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcodeTerminal = require('qrcode-terminal');
-const qrcodeImage = require('qrcode'); // 🟢 المكتبة الجديدة للصور
+const qrcodeImage = require('qrcode');
 require('dotenv').config();
 
 const app = express();
@@ -10,7 +10,7 @@ app.use(express.json());
 const API_KEY = process.env.API_KEY || 'kac8_super_secret_key_2026';
 const PORT = process.env.PORT || 3001;
 
-let latestQR = ""; // 🟢 متغير لحفظ الباركود
+let latestQR = ""; 
 
 // 🛡️ جدار حماية بسيط
 const authenticate = (req, res, next) => {
@@ -23,17 +23,26 @@ const authenticate = (req, res, next) => {
     }
 };
 
-// 🟢 إعداد عميل الواتساب
+// 🟢 إعداد عميل الواتساب (نسخة التخسيس القسوى)
 const client = new Client({
     authStrategy: new LocalAuth(), 
     puppeteer: {
-        args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+        headless: true,
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage', // يمنع كراش الرام
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu'
+        ] 
     }
 });
 
 // 📸 توليد الباركود
 client.on('qr', (qr) => {
-    latestQR = qr; // حفظ الباركود الجديد
+    latestQR = qr;
     console.log('\n=========================================');
     console.log('📱 تم توليد باركود جديد! افتح الرابط التالي لمسحه كصورة:');
     console.log(`🌐 ${process.env.RENDER_EXTERNAL_URL || ('http://localhost:' + PORT)}/qr`);
@@ -42,18 +51,18 @@ client.on('qr', (qr) => {
 
 // ✅ تأكيد الاتصال
 client.on('ready', () => {
-    latestQR = ""; // تفريغ الباركود بعد الاتصال
+    latestQR = ""; 
     console.log('🟢 المدفعية جاهزة! الواتساب متصل بنجاح.');
 });
 
 client.initialize();
 
-// 🖼️ مسار عرض الباركود كصورة في المتصفح (الخطة السرية)
+// 🖼️ مسار عرض الباركود كصورة (بثيم KAC8)
 app.get('/qr', async (req, res) => {
     if (!latestQR) {
         return res.send(`
             <div style="display:flex; justify-content:center; align-items:center; height:100vh; background-color:#080808; color:#2e6417; font-family:sans-serif; text-align:center;">
-                <h2>🟢 المدفعية متصلة مسبقاً، أو السيرفر لا يزال يجهز الباركود (انتظر ثواني وحدث الصفحة).</h2>
+                <h2>🟢 المدفعية متصلة مسبقاً، أو السيرفر يجهز الباركود (انتظر ثواني وحدث).</h2>
             </div>
         `);
     }
@@ -71,7 +80,7 @@ app.get('/qr', async (req, res) => {
     }
 });
 
-// 🚀 مسار إرسال الرسائل (الـ API اللي بيكلمه متجرك)
+// 🚀 مسار إرسال الرسائل (الدولي الخفيف)
 app.post('/send', authenticate, async (req, res) => {
     const { phone, message } = req.body;
     
@@ -80,26 +89,25 @@ app.post('/send', authenticate, async (req, res) => {
     }
 
     try {
-        // تنظيف الرقم وتجهيزه للصيغة الدولية للواتساب
+        // 1. تنظيف الرقم من أي رموز أو مسافات
         let formattedPhone = phone.replace(/[^0-9]/g, '');
         
-        // لو العميل كتب 05 أو 5 مباشرة بدون المفتاح
-        if (formattedPhone.startsWith('05')) {
+        // 2. معالجة الأرقام بذكاء دولي
+        if (formattedPhone.startsWith('00')) {
+            // تحويل 00966 إلى 966
+            formattedPhone = formattedPhone.substring(2);
+        } else if (formattedPhone.startsWith('05') && formattedPhone.length === 10) {
+            // رقم سعودي محلي (05XXXXXXXX)
             formattedPhone = '966' + formattedPhone.substring(1);
         } else if (formattedPhone.startsWith('5') && formattedPhone.length === 9) {
+            // رقم سعودي محلي (5XXXXXXXX)
             formattedPhone = '966' + formattedPhone;
         }
-        
+        // الأرقام الأخرى (مثل 971 أو 20 أو 965) ستبقى كما هي بافتراض أنها صحيحة!
+
         const chatId = `${formattedPhone}@c.us`;
 
-        // 🛡️ فحص سيبراني: هل الرقم مسجل في الواتساب فعلاً؟
-        const isRegistered = await client.isRegisteredUser(chatId);
-        if (!isRegistered) {
-            console.warn(`⚠️ الرقم غير مسجل في الواتساب: ${formattedPhone}`);
-            return res.status(404).json({ error: 'الرقم غير مسجل بالواتساب!' });
-        }
-
-        // إرسال الرسالة بعد التأكد
+        // إرسال مباشر (بدون فحص isRegisteredUser لتجنب كراش الرام)
         await client.sendMessage(chatId, message);
         console.log(`📩 تم إرسال رسالة إلى: ${formattedPhone}`);
         res.status(200).json({ success: true, msg: 'Message sent successfully!' });
@@ -115,7 +123,7 @@ app.get('/ping', (req, res) => {
     res.status(200).send('I am awake, Emperor!');
 });
 
-// سكريبت الهاكرز
+// سكريبت الهاكرز للبقاء مستيقظاً
 const keepAwake = () => {
     const min = 5 * 60 * 1000;
     const max = 14 * 60 * 1000;
@@ -123,7 +131,7 @@ const keepAwake = () => {
     setTimeout(() => {
         const url = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
         fetch(`${url}/ping`)
-            .then(() => console.log(`[Keep-Alive ⚔️] ضربنا السيرفر عشان ما ينام! الضربة القادمة بعد ${Math.round(randomTime/60000)} دقايق.`))
+            .then(() => console.log(`[Keep-Alive ⚔️] النبض شغال! الضربة القادمة بعد ${Math.round(randomTime/60000)} دقايق.`))
             .catch(err => console.error('[Keep-Alive ❌] فشل النبض:', err.message));
         keepAwake();
     }, randomTime);
