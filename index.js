@@ -23,7 +23,7 @@ const authenticate = (req, res, next) => {
     }
 };
 
-// 🟢 إعداد عميل الواتساب (نسخة التخسيس القسوى)
+// 🟢 إعداد عميل الواتساب (نسخة التخسيس القصوى للرام - 512MB Limit Bypass)
 const client = new Client({
     authStrategy: new LocalAuth(), 
     puppeteer: {
@@ -31,11 +31,21 @@ const client = new Client({
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage', // يمنع كراش الرام
+            '--disable-dev-shm-usage', // يمنع كراش الرام الأساسي
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--disable-gpu'
+            '--disable-gpu',
+            // 🛑 ترسانة التخسيس الإضافية لمنع استهلاك الرام:
+            '--disable-extensions',
+            '--disable-background-networking',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-software-rasterizer',
+            '--mute-audio',
+            '--hide-scrollbars',
+            '--js-flags="--max-old-space-size=256"' // يجبر المتصفح ينظف الذاكرة بقوة
         ] 
     }
 });
@@ -103,7 +113,7 @@ app.post('/send', authenticate, async (req, res) => {
             // رقم سعودي محلي (5XXXXXXXX)
             formattedPhone = '966' + formattedPhone;
         }
-        // الأرقام الأخرى (مثل 971 أو 20 أو 965) ستبقى كما هي بافتراض أنها صحيحة!
+        // الأرقام الأخرى (الدولية) ستبقى كما هي بافتراض أنها صحيحة!
 
         const chatId = `${formattedPhone}@c.us`;
 
