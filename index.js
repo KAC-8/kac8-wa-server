@@ -71,24 +71,42 @@ app.get('/qr', async (req, res) => {
     }
 });
 
-// 🚀 مسار إرسال الرسائل
+// 🚀 مسار إرسال الرسائل (الـ API اللي بيكلمه متجرك)
 app.post('/send', authenticate, async (req, res) => {
     const { phone, message } = req.body;
+    
     if (!phone || !message) {
         return res.status(400).json({ error: 'Phone and message are required' });
     }
+
     try {
+        // تنظيف الرقم وتجهيزه للصيغة الدولية للواتساب
         let formattedPhone = phone.replace(/[^0-9]/g, '');
+        
+        // لو العميل كتب 05 أو 5 مباشرة بدون المفتاح
         if (formattedPhone.startsWith('05')) {
             formattedPhone = '966' + formattedPhone.substring(1);
+        } else if (formattedPhone.startsWith('5') && formattedPhone.length === 9) {
+            formattedPhone = '966' + formattedPhone;
         }
+        
         const chatId = `${formattedPhone}@c.us`;
+
+        // 🛡️ فحص سيبراني: هل الرقم مسجل في الواتساب فعلاً؟
+        const isRegistered = await client.isRegisteredUser(chatId);
+        if (!isRegistered) {
+            console.warn(`⚠️ الرقم غير مسجل في الواتساب: ${formattedPhone}`);
+            return res.status(404).json({ error: 'الرقم غير مسجل بالواتساب!' });
+        }
+
+        // إرسال الرسالة بعد التأكد
         await client.sendMessage(chatId, message);
         console.log(`📩 تم إرسال رسالة إلى: ${formattedPhone}`);
         res.status(200).json({ success: true, msg: 'Message sent successfully!' });
+
     } catch (error) {
-        console.error('❌ خطأ في الإرسال:', error);
-        res.status(500).json({ error: 'Failed to send message' });
+        console.error('❌ خطأ في الإرسال:', error.message);
+        res.status(500).json({ error: 'Failed to send message', details: error.message });
     }
 });
 
