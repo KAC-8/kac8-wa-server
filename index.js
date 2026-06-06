@@ -71,6 +71,35 @@ app.post('/send', authenticate, async (req, res) => {
     }
 });
 
+
+// مسار وهمي عشان السيرفر يزور نفسه (النبض)
+app.get('/ping', (req, res) => {
+    res.status(200).send('I am awake, Emperor!');
+});
+
+// سكريبت الهاكرز (Keep-Alive Bypass)
+const keepAwake = () => {
+    // وقت عشوائي بين 5 إلى 14 دقيقة (بالميلي ثانية)
+    const min = 5 * 60 * 1000;
+    const max = 14 * 60 * 1000;
+    const randomTime = Math.floor(Math.random() * (max - min + 1)) + min;
+
+    setTimeout(() => {
+        // Render يوفر هذا المتغير تلقائياً، يمثل رابط سيرفرك الفعلي
+        const url = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+        
+        fetch(`${url}/ping`)
+            .then(() => console.log(`[Keep-Alive ⚔️] ضربنا السيرفر عشان ما ينام! الضربة القادمة بعد ${Math.round(randomTime/60000)} دقايق.`))
+            .catch(err => console.error('[Keep-Alive ❌] فشل النبض:', err.message));
+        
+        keepAwake(); // استدعاء متكرر للعملية
+    }, randomTime);
+};
+
+// تشغيل النبض
+keepAwake();
+
+
 app.listen(PORT, () => {
     console.log(`🚀 سيرفر الإشعارات شغال وينتظر الأوامر على البورت ${PORT}`);
 });
