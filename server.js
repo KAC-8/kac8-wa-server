@@ -22,6 +22,32 @@ const { Client, LocalAuth } = pkg;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** Load ~/kac8-wa-server/.env when not injected by systemd EnvironmentFile */
+function loadDotEnv() {
+  for (const name of [".env", ".env.local"]) {
+    const envPath = path.join(__dirname, name);
+    if (!fs.existsSync(envPath)) continue;
+    const text = fs.readFileSync(envPath, "utf8");
+    for (const line of text.split("\n")) {
+      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)?$/);
+      if (!m) continue;
+      const key = m[1];
+      let val = (m[2] ?? "").trim();
+      if (
+        (val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))
+      ) {
+        val = val.slice(1, -1);
+      }
+      if (!process.env[key]) process.env[key] = val;
+    }
+    console.log(`[wa-gateway] loaded env from ${envPath}`);
+    break;
+  }
+}
+
+loadDotEnv();
+
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -310,24 +336,39 @@ function pickMessage(body) {
   return String(body?.message ?? body?.text ?? "").trim();
 }
 
+/** Individual contact — never returns a group JID. */
 function pickPhone(body) {
   const raw = body?.phone ?? body?.number ?? body?.to ?? "";
   const s = String(raw).trim();
   if (!s) return null;
   if (s.endsWith("@g.us")) return null;
+  if (s.endsWith("@c.us")) {
+    const n = s.slice(0, -5).replace(/\D/g, "");
+    return n.length >= 8 && n.length <= 15 ? n : null;
+  }
   const digits = s.replace(/[^\d+]/g, "");
   if (!/^\+?\d{8,15}$/.test(digits)) return null;
   return digits.startsWith("+") ? digits.slice(1) : digits;
 }
 
+/** Group JID — only from explicit group fields (never from `phone`). */
 function pickGroupJid(body) {
-  const raw = body?.group ?? body?.jid ?? body?.to ?? body?.phone ?? "";
-  const s = String(raw).trim();
+  const raw = body?.group ?? body?.jid ?? "";
+  let s = String(raw).trim();
+  if (!s) {
+    const to = String(body?.to ?? "").trim();
+    if (to.endsWith("@g.us")) s = to;
+  }
   if (!s) return null;
   if (s.endsWith("@g.us")) return s;
   const digits = s.replace(/\D/g, "");
-  if (digits.length >= 10 && digits.length <= 25) return `${digits}@g.us`;
+  // WhatsApp group IDs are typically 18–22 digits; phones are ≤15.
+  if (digits.length >= 16 && digits.length <= 25) return `${digits}@g.us`;
   return null;
+}
+
+function toContactJid(phoneDigits) {
+  return `${phoneDigits}@c.us`;
 }
 
 app.get("/health", (_req, res) => {
@@ -387,40 +428,40 @@ app.get("/groups", requireToken, async (_req, res) => {
   }
 });
 
-async function sendText(jid, message, res) {
+async function sendText(jid, message, res, meta = {}) {
   if (!message) {
     return res.status(400).json({ success: false, reason: "empty_message" });
   }
   if (!isReady || !client) return notReadyResponse(res);
+  const recipientType = jid.endsWith("@g.us") ? "group" : "contact";
   try {
     const result = await client.sendMessage(jid, message.slice(0, 4096));
     res.json({
       success: true,
       id: result?.id?._serialized ?? result?.id?.id,
       to: jid,
+      recipientType,
+      ...meta,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[wa-gateway] send failed:", msg);
-    res.status(500).json({ success: false, reason: msg, state: waState });
+    console.error("[wa-gateway] send failed:", msg, { jid, recipientType });
+    res.status(500).json({ success: false, reason: msg, state: waState, to: jid, recipientType });
   }
 }
 
-/** Primary endpoint used by KAC8 store (WHATSAPP_API_URL) */
+/** Primary endpoint used by KAC8 store (WHATSAPP_API_URL) — individual contacts only */
 app.post("/send", requireToken, async (req, res) => {
   const message = pickMessage(req.body);
-  const groupJid = pickGroupJid(req.body);
-  if (groupJid) return sendText(groupJid, message, res);
-
   const phone = pickPhone(req.body);
   if (!phone) {
     return res.status(400).json({
       success: false,
-      reason: "invalid_phone_or_group",
-      hint: "Use E.164 phone or group JID ending in @g.us",
+      reason: "invalid_phone",
+      hint: "Send { phone: '9665XXXXXXXX', message: '...' } — E.164 digits only, no @g.us",
     });
   }
-  return sendText(`${phone}@c.us`, message, res);
+  return sendText(toContactJid(phone), message, res, { phone });
 });
 
 app.post("/send/group", requireToken, async (req, res) => {
@@ -430,10 +471,10 @@ app.post("/send/group", requireToken, async (req, res) => {
     return res.status(400).json({
       success: false,
       reason: "invalid_group",
-      hint: "Provide group/jid/to as 120363…@g.us",
+      hint: "Provide group/jid as 120363…@g.us via { group: '...', message: '...' }",
     });
   }
-  return sendText(groupJid, message, res);
+  return sendText(groupJid, message, res, { group: groupJid });
 });
 
 app.use((_req, res) => {
@@ -468,6 +509,12 @@ process.on("SIGTERM", async () => {
 app.listen(PORT, HOST, () => {
   console.log(`[wa-gateway] HTTP listening on http://${HOST}:${PORT}`);
   console.log(`[wa-gateway] QR page: http://${HOST}:${PORT}/qr`);
+  console.log(`[wa-gateway] API_TOKEN configured: ${Boolean(API_TOKEN)}`);
+  if (!API_TOKEN) {
+    console.warn(
+      "[wa-gateway] WARNING: set API_TOKEN in .env or systemd EnvironmentFile — POST /send will reject requests",
+    );
+  }
   initClient().catch((err) => {
     console.error("[wa-gateway] initial init failed:", err);
     restartClient("boot_init_failed");
