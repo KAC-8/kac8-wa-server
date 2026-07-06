@@ -8,6 +8,7 @@
  *   GET  /health, /status, /qr
  *   GET  /groups
  *   POST /send          { phone|number|to, message|text }
+ *   POST /send/document { phone, base64|url, filename?, caption? }
  *   POST /send/group    { group|jid|to, message|text }
  */
 
@@ -18,7 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pkg from "whatsapp-web.js";
 
-const { Client, LocalAuth } = pkg;
+const { Client, LocalAuth, MessageMedia } = pkg;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -288,7 +289,7 @@ async function initClient() {
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
 
 const app = express();
-app.use(express.json({ limit: "64kb" }));
+app.use(express.json({ limit: "12mb" }));
 
 function requireToken(req, res, next) {
   if (!API_TOKEN) {
@@ -462,6 +463,62 @@ app.post("/send", requireToken, async (req, res) => {
     });
   }
   return sendText(toContactJid(phone), message, res, { phone });
+});
+
+/** PDF / document attachment — base64 or public HTTPS URL */
+app.post("/send/document", requireToken, async (req, res) => {
+  const phone = pickPhone(req.body);
+  if (!phone) {
+    return res.status(400).json({
+      success: false,
+      reason: "invalid_phone",
+      hint: "Send { phone: '9665XXXXXXXX', base64: '...', filename: 'invoice.pdf' }",
+    });
+  }
+
+  const filename = String(req.body.filename ?? "document.pdf").slice(0, 200);
+  const caption = String(req.body.caption ?? req.body.message ?? "").trim().slice(0, 1024);
+  const mimetype = String(req.body.mimetype ?? "application/pdf");
+  const rawBase64 = String(req.body.base64 ?? req.body.documentBase64 ?? "").trim();
+  const base64 = rawBase64
+    .replace(/^data:[^;]+;base64,/i, "")
+    .replace(/\s/g, "");
+  const url = String(req.body.url ?? req.body.document ?? req.body.documentUrl ?? "").trim();
+
+  if (!base64 && !url) {
+    return res.status(400).json({ success: false, reason: "missing_document" });
+  }
+  if (!isReady || !client) return notReadyResponse(res);
+
+  try {
+    let media;
+    if (base64) {
+      const safeName = filename.toLowerCase().endsWith(".pdf") ? filename : `${filename}.pdf`;
+      media = new MessageMedia(mimetype, base64, safeName);
+    } else {
+      media = await MessageMedia.fromUrl(url, { unsafeMime: true });
+    }
+
+    const jid = toContactJid(phone);
+    const result = await client.sendMessage(
+      jid,
+      media,
+      caption ? { caption } : {},
+    );
+
+    res.json({
+      success: true,
+      id: result?.id?._serialized ?? result?.id?.id,
+      to: jid,
+      recipientType: "contact",
+      phone,
+      type: "document",
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[wa-gateway] document send failed:", msg, { phone });
+    res.status(500).json({ success: false, reason: msg, state: waState, phone });
+  }
 });
 
 app.post("/send/group", requireToken, async (req, res) => {
